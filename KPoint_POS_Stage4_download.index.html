@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>K-Point POS — Stock Receiving & Paid Checkout</title>
+<style>
+:root{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:#182230;background:#f3f6fb}
+*{box-sizing:border-box}body{margin:0}header{background:#12213b;color:#fff;padding:16px 18px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+h1{font-size:20px;margin:0}header p{margin:3px 0 0;color:#c8d6ef;font-size:13px}
+main{max-width:1000px;margin:0 auto;padding:18px}.card{background:white;border:1px solid #dce4ef;border-radius:15px;padding:17px;margin-bottom:15px;box-shadow:0 5px 18px #15294a0b}
+h2{font-size:18px;margin:0 0 12px}.muted{color:#65748b;font-size:13px}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.field{display:grid;gap:5px}.field label{font-size:13px;font-weight:650;color:#475569}.field input,.field select{width:100%;padding:11px;border:1px solid #cbd5e1;border-radius:9px;background:white;color:#182230;font:inherit}
+button{border:0;border-radius:9px;padding:11px 14px;background:#155eef;color:white;font:inherit;font-weight:650;cursor:pointer}button.secondary{background:#eaf0f8;color:#26364f}button:disabled{opacity:.55;cursor:wait}.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}.notice{padding:12px;border-radius:10px;background:#eef5ff;color:#29456f;font-size:13px;margin-bottom:14px}.status{padding:12px;border-radius:10px;margin:12px 0;white-space:pre-wrap;font-size:13px}.status.ok{background:#e8f8ef;color:#166534}.status.err{background:#fff0f0;color:#991b1b}.status.info{background:#eef5ff;color:#29456f}.hidden{display:none!important}.table-wrap{overflow:auto}table{border-collapse:collapse;width:100%;min-width:620px}th,td{text-align:left;padding:10px;border-bottom:1px solid #e5eaf1;font-size:13px;white-space:nowrap}th{background:#f7f9fc;color:#526176}.badge{display:inline-block;background:#e8f8ef;color:#166534;border-radius:99px;padding:4px 8px;font-size:12px;font-weight:700}.topline{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}.small{font-size:12px}@media(max-width:600px){main{padding:12px}.grid{grid-template-columns:1fr}header{padding:14px}}
+</style>
+</head>
+<body>
+<header>
+  <div><h1>K-Point POS</h1><p>Branch-aware products, stock receiving & paid checkout — Stage 4</p></div>
+  <div class="actions" style="margin:0"><span id="roleBadge" class="badge hidden"></span><button id="signOutBtn" class="secondary hidden" type="button">Sign out</button></div>
+</header>
+<main>
+  <div class="notice"><strong>Important:</strong> This version connects to Supabase, separates Simoonga and Zimba stock, supports paid checkout, and includes stock receiving through the kpoint_receive_stock database function. Test carefully before live use. Offline sales synchronisation and full owner/staff permission testing are not complete yet.</div>
+  <div id="status" class="status info">Enter the email and password for the Supabase account you already created.</div>
+  <section id="loginCard" class="card">
+    <h2>Sign in to K-Point POS</h2>
+    <form id="loginForm">
+      <div class="grid">
+        <div class="field"><label for="email">Account email</label><input id="email" type="email" autocomplete="username" required></div>
+        <div class="field"><label for="password">Password</label><input id="password" type="password" autocomplete="current-password" required></div>
+      </div>
+      <div class="actions"><button id="loginBtn" type="submit">Sign in</button></div>
+    </form>
+    <p class="muted">Your password is sent to Supabase authentication, not saved in this HTML file. Never enter your Supabase secret/service-role key here.</p>
+  </section>
+
+  <section id="productSection" class="hidden">
+    <div class="card">
+      <div class="topline"><h2>Business connection</h2><span id="businessBadge" class="badge"></span></div>
+      <p class="muted">Choose a branch to view its products and stock. Owners can switch between assigned branches; employees only see their assigned branch. Products are saved in the cloud database.</p>
+      <div class="field" style="max-width:420px"><label for="branchPick">Active branch</label><select id="branchPick" required><option value="">Loading branches…</option></select></div>
+    </div>
+    <div class="card" id="addProductCard">
+      <h2>Add a product</h2>
+      <form id="productForm">
+        <div class="grid">
+          <div class="field"><label for="productBranch">Branch *</label><select id="productBranch" required><option value="">Choose a branch…</option></select></div>
+          <div class="field"><label for="name">Product name *</label><input id="name" required maxlength="120" placeholder="e.g. Sunder Fast Charger"></div>
+          <div class="field"><label for="category">Category</label><input id="category" maxlength="80" placeholder="e.g. Chargers"></div>
+          <div class="field"><label for="barcode">Barcode (optional)</label><input id="barcode" maxlength="120" placeholder="Scan or type barcode"></div>
+          <div class="field"><label for="productCode">Your product code (optional)</label><input id="productCode" maxlength="80" placeholder="e.g. CHG-001"></div>
+          <div class="field"><label for="quantity">Opening stock quantity *</label><input id="quantity" type="number" min="0" step="1" value="0" required></div>
+          <div class="field"><label for="retailPrice">Retail selling price (K) *</label><input id="retailPrice" type="number" min="0" step="0.01" required></div>
+          <div class="field"><label for="wholesalePrice">Wholesale selling price (K) *</label><input id="wholesalePrice" type="number" min="0" step="0.01" required></div>
+          <div class="field" id="buyingPriceField"><label for="buyingPrice">Buying price per unit (K) — owner only *</label><input id="buyingPrice" type="number" min="0" step="0.01" placeholder="Supplier cost"></div>
+        </div>
+        <div class="actions"><button id="saveProductBtn" type="submit">Save product</button><button id="refreshBtn" type="button" class="secondary">Refresh products</button></div>
+      </form>
+      <p class="muted">Use Stock Receiving below to record purchases and allocate shipping/other costs to received stock. Verify the buying-cost calculation before relying on profit reports.</p>
+    </div>
+    <div class="card">
+      <div class="topline"><h2>Products in the active branch</h2><span id="countBadge" class="badge">0 products</span></div>
+      <div class="table-wrap" id="productTable"><p class="muted">Sign in to load products.</p></div>
+    </div>
+    <section class="card" id="stockReceivingCard">
+      <h2>Stock Receiving</h2>
+      <p class="muted">Record new stock for the active branch. Purchase, shipping and other costs are combined to calculate landed cost per unit. This calls the secure kpoint_receive_stock database function; the function must already exist in Supabase.</p>
+      <form id="stockReceivingForm">
+        <div class="grid">
+          <div class="field"><label for="receiveProduct">Product *</label><select id="receiveProduct" required><option value="">Load products first</option></select></div>
+          <div class="field"><label for="receiveBranch">Receiving branch</label><input id="receiveBranch" readonly value="Choose active branch"></div>
+          <div class="field"><label for="receiveQty">Quantity received *</label><input id="receiveQty" type="number" min="1" step="1" required placeholder="e.g. 100"></div>
+          <div class="field"><label for="receivePurchaseTotal">Total purchase cost (K) *</label><input id="receivePurchaseTotal" type="number" min="0" step="0.01" required placeholder="Cost of all units"></div>
+          <div class="field"><label for="receiveShippingTotal">Shipping cost (K)</label><input id="receiveShippingTotal" type="number" min="0" step="0.01" value="0" required></div>
+          <div class="field"><label for="receiveOtherCost">Other costs (K)</label><input id="receiveOtherCost" type="number" min="0" step="0.01" value="0" required></div>
+          <div class="field"><label for="receiveReference">Supplier / shipment reference</label><input id="receiveReference" maxlength="160" placeholder="e.g. FYCargo shipment 001"></div>
+        </div>
+        <div class="notice" style="margin-top:12px;margin-bottom:0">Estimated landed cost: <strong id="receiveLandedTotal">K0.00</strong> · Cost per received unit: <strong id="receiveLandedUnit">K0.00</strong></div>
+        <div class="actions"><button id="receiveStockBtn" type="submit">Record stock received</button><button id="resetReceiveBtn" type="button" class="secondary">Clear form</button></div>
+      </form>
+      <p class="muted">Submitting changes the real database stock and buying cost. Do not submit a receipt unless the purchase actually happened.</p>
+    </section>
+    <section class="card">
+      <h2>Checkout — Secure paid checkout</h2>
+      <p class="muted">Choose products manually or scan a barcode with your phone camera / Bluetooth scanner. The secure Supabase checkout function validates stock, records the paid sale, and deducts stock in one database transaction.</p>
+      <div class="grid">
+        <div class="field"><label for="checkoutSearch">Find product by name, code or barcode</label><input id="checkoutSearch" placeholder="Type a name, code or barcode"></div>
+        <div class="field"><label for="scanInput">Barcode scanner input</label><input id="scanInput" placeholder="Tap here, then scan with scanner"></div>
+      </div>
+      <div class="actions"><button id="cameraBtn" type="button" class="secondary">Open phone camera scanner</button><button id="stopCameraBtn" type="button" class="secondary hidden">Stop scanner</button></div>
+      <div id="cameraArea" class="hidden" style="margin-top:12px"><video id="cameraVideo" playsinline style="width:100%;max-width:420px;border-radius:12px;background:#111"></video><p class="muted">Camera scanning requires HTTPS and browser camera permission. If it doesn't work in a local HTML file, use the manual/scanner input or host the page on HTTPS.</p></div>
+      <div class="field" style="margin-top:12px"><label for="productPick">Select product</label><select id="productPick"><option value="">Load products first</option></select></div>
+      <div class="grid" style="margin-top:12px">
+        <div class="field"><label for="saleQty">Quantity</label><input id="saleQty" type="number" min="1" step="1" value="1"></div>
+        <div class="field"><label for="saleType">Sale type</label><select id="saleType"><option value="retail">Retail</option><option value="wholesale">Wholesale</option></select></div>
+      </div>
+      <div class="actions"><button id="addCartBtn" type="button">Add to cart</button><button id="clearCartBtn" type="button" class="secondary">Clear cart</button></div>
+      <div id="cartTable" class="table-wrap" style="margin-top:12px"><p class="muted">Cart is empty.</p></div>
+      <div class="topline" style="margin-top:12px"><strong>Cart total: <span id="cartTotal">K0.00</span></strong><span id="cartHint" class="muted">No items added</span></div>
+      <div class="grid" style="margin-top:12px">
+        <div class="field"><label for="paymentMethod">Payment method (fully paid sales only)</label><select id="paymentMethod"><option value="cash">Cash</option><option value="airtel_money">Airtel Money</option><option value="mtn_momo">MTN MoMo</option><option value="bank_transfer">Bank transfer</option><option value="other">Other</option></select></div>
+      </div>
+      <div class="actions"><button id="completeSaleBtn" type="button">Record paid sale</button></div>
+      <p class="muted">Checkout records only fully paid sales (no customer credit). The secure Supabase checkout function validates stock, records the sale and payment, and deducts stock in one database transaction. It requires the checkout SQL setup to have been installed successfully.</p>
+    </section>
+  </section>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+const SUPABASE_URL = "https://dqnmtyqrxnjfxiztbaqy.supabase.co";
+const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_fV8N_WpvOqbUlnjBDdMlCw_PeLJsbmV";
+const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
+let currentUser = null, businessId = null, businessName = "K-Point POS", isOwner = false, productRows = [], productChannel = null, shopRows = [], selectedShopId = null;
+const $ = id => document.getElementById(id);
+function setStatus(message, type="info"){ $("status").textContent=message; $("status").className="status "+type; }
+function money(v){return "K"+Number(v||0).toLocaleString("en-ZM",{minimumFractionDigits:2,maximumFractionDigits:2});}
+function esc(v){return String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
+function errText(e){return e?.message||e?.error_description||String(e||"Unknown error");}
+async function resolveBusiness(){
+  const {data: memberships, error} = await db.from("memberships").select("business_id, role").eq("user_id",currentUser.id);
+  if(error) throw new Error("Could not read your business membership: "+errText(error));
+  if(!memberships?.length) throw new Error("Your signed-in account has no business membership. Ask the project owner to check the K-Point POS membership row.");
+  const membership = memberships.find(m=>String(m.role||"").toLowerCase()==="owner") || memberships[0];
+  businessId=membership.business_id;
+  isOwner=String(membership.role||"").toLowerCase()==="owner";
+  const {data: biz, error: bizErr}=await db.from("businesses").select("id,name,currency").eq("id",businessId).maybeSingle();
+  if(bizErr) throw new Error("Membership found, but business details could not be loaded: "+errText(bizErr));
+  if(biz){businessName=biz.name||businessName;$("businessBadge").textContent=businessName+" • "+(biz.currency||"ZMW");}
+  else $("businessBadge").textContent=businessName;
+  $("roleBadge").textContent=isOwner?"OWNER ACCESS":"STAFF ACCESS";
+  $("roleBadge").classList.remove("hidden");
+  $("buyingPriceField").classList.toggle("hidden",!isOwner);
+  $("buyingPrice").required=isOwner;
+  $("addProductCard").classList.toggle("hidden",!isOwner);
+  const {data: accessibleShops, error: shopsError} = await db.rpc("kpoint_accessible_shops", {p_business_id: businessId});
+  if(shopsError) throw new Error("Could not load your branch access. Run the companion branch-access SQL in Supabase first: "+errText(shopsError));
+  shopRows = accessibleShops || [];
+  if(!shopRows.length) throw new Error("No branch is assigned to this account. Ask the owner to assign this account to Simoonga or Zimba.");
+  selectedShopId = shopRows[0].shop_id;
+  const options = shopRows.map(sh=>'<option value="'+esc(sh.shop_id)+'">'+esc(sh.shop_name)+'</option>').join("");
+  $("branchPick").innerHTML = options;
+  $("productBranch").innerHTML = '<option value="">Choose a branch…</option>'+options;
+  $("branchPick").value = selectedShopId;
+  $("productBranch").value = selectedShopId;
+  $("branchPick").disabled = shopRows.length < 2;
+  $("productBranch").disabled = shopRows.length < 2;
+}
+async function loadProducts(){
+  if(!selectedShopId) throw new Error("Choose a branch before loading products.");
+  const {data,error}=await db.from("products").select("id,business_id,shop_id,name,barcode,product_code,category,quantity,retail_price,wholesale_price,created_at").eq("business_id",businessId).eq("shop_id",selectedShopId).order("name");
+  if(error) throw new Error("Could not load products: "+errText(error));
+  productRows=data||[];
+  renderProducts();
+}
+function startProductRealtime(){
+ if(productChannel){db.removeChannel(productChannel);productChannel=null;}
+ productChannel=db.channel("kpoint-products-"+businessId)
+  .on("postgres_changes",{event:"*",schema:"public",table:"products",filter:"business_id=eq."+businessId},async()=>{
+   try{await loadProducts();setStatus("Cloud stock updated from another device.","ok");}catch(e){setStatus("Live update received, but refresh failed: "+errText(e),"err");}
+  }).subscribe();
+}
+function renderProducts(){
+  $("countBadge").textContent=productRows.length+" product"+(productRows.length===1?"":"s");
+  if(!productRows.length){$("productTable").innerHTML='<p class="muted">No products yet. Add your first product using the form above.</p>';return;}
+  $("productTable").innerHTML='<table><thead><tr><th>Product</th><th>Category</th><th>Barcode / Code</th><th>Stock</th><th>Retail</th><th>Wholesale</th></tr></thead><tbody>'+productRows.map(p=>'<tr><td><strong>'+esc(p.name)+'</strong></td><td>'+esc(p.category||"—")+'</td><td>'+esc(p.barcode||p.product_code||"—")+'</td><td>'+Number(p.quantity||0)+'</td><td>'+money(p.retail_price)+'</td><td>'+money(p.wholesale_price)+'</td></tr>').join("")+'</tbody></table>';
+}
+$("loginForm").addEventListener("submit",async e=>{
+ e.preventDefault(); $("loginBtn").disabled=true; setStatus("Signing in and checking your business membership…");
+ try{
+  const {data,error}=await db.auth.signInWithPassword({email:$("email").value.trim(),password:$("password").value});
+  if(error) throw error;
+  currentUser=data.user;
+  await resolveBusiness();
+  $("loginCard").classList.add("hidden"); $("productSection").classList.remove("hidden"); $("signOutBtn").classList.remove("hidden");
+  await loadProducts(); startProductRealtime();
+  setStatus("Connected successfully. Products load from Supabase and live stock updates are enabled when the database realtime feed is available.","ok");
+ }catch(e){setStatus(errText(e),"err");}
+ finally{$("loginBtn").disabled=false;}
+});
+$("productForm").addEventListener("submit",async e=>{
+ e.preventDefault(); if(!currentUser||!businessId)return setStatus("Please sign in first.","err");
+ const btn=$("saveProductBtn"); btn.disabled=true; setStatus("Saving product…");
+ const product={
+  business_id:businessId,
+  shop_id:$("productBranch").value,
+  name:$("name").value.trim(),
+  barcode:$("barcode").value.trim()||null,
+  product_code:$("productCode").value.trim()||null,
+  category:$("category").value.trim()||null,
+  quantity:Number($("quantity").value),
+  retail_price:Number($("retailPrice").value),
+  wholesale_price:Number($("wholesalePrice").value)
+ };
+ try{
+  if(!product.shop_id || !shopRows.some(sh=>sh.shop_id===product.shop_id)) throw new Error("Choose a branch you have access to.");
+  if(product.shop_id!==selectedShopId) throw new Error("The product branch must match the active branch. Select that branch at the top first.");
+  if(!product.name) throw new Error("Enter a product name.");
+  if(!Number.isInteger(product.quantity)||product.quantity<0) throw new Error("Stock quantity must be a whole number, zero or higher.");
+  if(product.retail_price<0||product.wholesale_price<0) throw new Error("Selling prices cannot be negative.");
+  const {data: inserted,error}=await db.from("products").insert(product).select("id,business_id,shop_id,name,barcode,product_code,category,quantity,retail_price,wholesale_price,created_at").single();
+  if(error) throw new Error("Product was not saved: "+errText(error));
+  if(isOwner){
+    const cost=Number($("buyingPrice").value);
+    if(!Number.isFinite(cost)||cost<0) throw new Error("Product saved, but buying price is missing or invalid. Add its cost from the owner account.");
+    const {error:costError}=await db.from("product_costs").upsert({product_id:inserted.id,business_id:businessId,buying_price:cost},{onConflict:"product_id"});
+    if(costError) throw new Error("Product was saved, but its buying cost could not be saved: "+errText(costError)+". Do not assume profit reporting is ready.");
+  }
+  e.target.reset(); $("quantity").value="0"; await loadProducts(); setStatus("Product saved to your K-Point POS cloud database.","ok");
+ }catch(e){setStatus(errText(e),"err");}
+ finally{btn.disabled=false;}
+});
+$("refreshBtn").addEventListener("click",async()=>{try{await loadProducts();setStatus("Product list refreshed.","ok")}catch(e){setStatus(errText(e),"err")}});
+$("branchPick").addEventListener("change",async()=>{const next=$("branchPick").value;if(!shopRows.some(sh=>sh.shop_id===next))return;selectedShopId=next;$("productBranch").value=next;cart=[];renderCart();try{await loadProducts();setStatus("Active branch changed to "+(shopRows.find(sh=>sh.shop_id===next)?.shop_name||"selected branch")+". Cart cleared to prevent cross-branch checkout.","ok");}catch(e){setStatus(errText(e),"err");}});
+$("productBranch").addEventListener("change",()=>{if($("productBranch").value!==selectedShopId){$("productBranch").value=selectedShopId;setStatus("Select the active branch at the top before adding a product.","info");}});
+$("signOutBtn").addEventListener("click",async()=>{if(productChannel){await db.removeChannel(productChannel);productChannel=null;}await db.auth.signOut();currentUser=null;businessId=null;isOwner=false;productRows=[];$("productSection").classList.add("hidden");$("loginCard").classList.remove("hidden");$("signOutBtn").classList.add("hidden");$("roleBadge").classList.add("hidden");setStatus("Signed out.","info");});
+let cart = [], cameraStream = null, cameraTimer = null;
+function refreshReceivePicker(){
+  const select=$("receiveProduct");
+  if(!select) return;
+  const previous=select.value;
+  select.innerHTML='<option value="">Choose a product…</option>'+productRows.map(p=>'<option value="'+esc(p.id)+'">'+esc(p.name)+' — stock '+Number(p.quantity||0)+'</option>').join("");
+  if(productRows.some(p=>p.id===previous)) select.value=previous;
+  const active=shopRows.find(sh=>sh.shop_id===selectedShopId);
+  $("receiveBranch").value=active?.shop_name||"Choose active branch";
+}
+function updateReceiveEstimate(){
+  const qty=Number($("receiveQty").value||0), purchase=Number($("receivePurchaseTotal").value||0), shipping=Number($("receiveShippingTotal").value||0), other=Number($("receiveOtherCost").value||0);
+  const total=purchase+shipping+other;
+  $("receiveLandedTotal").textContent=money(total);
+  $("receiveLandedUnit").textContent=money(qty>0?total/qty:0);
+}
+function refreshPicker(){
+ const q=$("checkoutSearch").value.trim().toLowerCase();
+ const list=productRows.filter(p=>[p.name,p.barcode,p.product_code,p.category].some(v=>String(v||"").toLowerCase().includes(q)));
+ $("productPick").innerHTML='<option value="">Choose a product…</option>'+list.map(p=>'<option value="'+esc(p.id)+'">'+esc(p.name)+' — stock '+Number(p.quantity||0)+' — '+money($("saleType").value==="wholesale"?p.wholesale_price:p.retail_price)+'</option>').join("");
+}
+function renderCart(){
+ $("cartTotal").textContent=money(cart.reduce((a,x)=>a+x.price*x.quantity,0));
+ $("cartHint").textContent=cart.length?cart.reduce((a,x)=>a+x.quantity,0)+" item units":"No items added";
+ if(!cart.length){$("cartTable").innerHTML='<p class="muted">Cart is empty.</p>';return;}
+ $("cartTable").innerHTML='<table><thead><tr><th>Product</th><th>Qty</th><th>Unit price</th><th>Subtotal</th><th></th></tr></thead><tbody>'+cart.map((x,i)=>'<tr><td>'+esc(x.name)+'</td><td>'+x.quantity+'</td><td>'+money(x.price)+'</td><td>'+money(x.price*x.quantity)+'</td><td><button type="button" class="secondary" data-remove="'+i+'">Remove</button></td></tr>').join("")+'</tbody></table>';
+ $("cartTable").querySelectorAll("[data-remove]").forEach(b=>b.addEventListener("click",()=>{cart.splice(Number(b.dataset.remove),1);renderCart()}));
+}
+$("checkoutSearch").addEventListener("input",refreshPicker);
+$("saleType").addEventListener("change",refreshPicker);
+$("scanInput").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();const code=e.target.value.trim();const p=productRows.find(p=>String(p.barcode||"")===code||String(p.product_code||"")===code);if(p){$("productPick").value=p.id;$("saleQty").focus();setStatus("Found "+p.name+" from barcode/code. Set quantity and add to cart.","ok");}else setStatus("No product matched that barcode/code. Add the barcode to the product record first.","err");e.target.select();}});
+$("productPick").addEventListener("change",()=>{const p=productRows.find(p=>p.id===$("productPick").value);if(p&&p.barcode)$("scanInput").value=p.barcode;});
+$("addCartBtn").addEventListener("click",()=>{
+ const p=productRows.find(p=>p.id===$("productPick").value), qty=Number($("saleQty").value), type=$("saleType").value;
+ if(!p)return setStatus("Choose a product first.","err");
+ if(!Number.isInteger(qty)||qty<1)return setStatus("Enter a whole-number quantity of at least 1.","err");
+ if(qty>Number(p.quantity||0))return setStatus("The requested quantity is greater than the displayed stock. No sale was recorded.","err");
+ const price=Number(type==="wholesale"?p.wholesale_price:p.retail_price);
+ const existing=cart.find(x=>x.id===p.id&&x.type===type);
+ const totalQty=qty+(existing?.quantity||0);
+ if(totalQty>Number(p.quantity||0))return setStatus("Cart quantity would exceed the displayed stock.","err");
+ if(existing)existing.quantity=totalQty;else cart.push({id:p.id,name:p.name,quantity:qty,price,type});
+ renderCart();setStatus("Added to test cart. No stock has been changed.","ok");
+});
+$("clearCartBtn").addEventListener("click",()=>{cart=[];renderCart();});
+["receiveQty","receivePurchaseTotal","receiveShippingTotal","receiveOtherCost"].forEach(id=>$(id).addEventListener("input",updateReceiveEstimate));
+$("resetReceiveBtn").addEventListener("click",()=>{$("stockReceivingForm").reset();$("receiveShippingTotal").value="0";$("receiveOtherCost").value="0";updateReceiveEstimate();refreshReceivePicker();});
+$("stockReceivingForm").addEventListener("submit",async e=>{
+  e.preventDefault();
+  if(!currentUser||!businessId)return setStatus("Please sign in first.","err");
+  const productId=$("receiveProduct").value, qty=Number($("receiveQty").value), purchase=Number($("receivePurchaseTotal").value), shipping=Number($("receiveShippingTotal").value||0), other=Number($("receiveOtherCost").value||0), reference=$("receiveReference").value.trim()||null;
+  const product=productRows.find(p=>p.id===productId);
+  if(!product)return setStatus("Choose a product from the active branch.","err");
+  if(!Number.isInteger(qty)||qty<1)return setStatus("Quantity received must be a whole number greater than zero.","err");
+  if(!Number.isFinite(purchase)||purchase<0||!Number.isFinite(shipping)||shipping<0||!Number.isFinite(other)||other<0)return setStatus("Costs must be valid numbers and cannot be negative.","err");
+  if(product.shop_id!==selectedShopId)return setStatus("That product is not in the active branch. Change branch and try again.","err");
+  const landed=purchase+shipping+other;
+  if(!confirm("Record "+qty+" units of "+product.name+" for "+(shopRows.find(sh=>sh.shop_id===selectedShopId)?.shop_name||"this branch")+"? Total landed cost: "+money(landed)+". Stock will increase."))return;
+  const btn=$("receiveStockBtn");btn.disabled=true;setStatus("Recording received stock securely…","info");
+  try{
+    const {data,error}=await db.rpc("kpoint_receive_stock",{p_business_id:businessId,p_product_id:productId,p_quantity:qty,p_purchase_total:purchase,p_shipping_total:shipping,p_other_cost:other,p_reference:reference});
+    if(error)throw new Error("Stock was not recorded: "+errText(error)+". Check that the kpoint_receive_stock SQL function exists and your account can access this branch.");
+    await loadProducts();
+    e.target.reset();$("receiveShippingTotal").value="0";$("receiveOtherCost").value="0";updateReceiveEstimate();refreshReceivePicker();
+    const result=(data&&typeof data==="object")?data:{};
+    setStatus("Stock received successfully. "+qty+" units of "+product.name+" added. Total landed cost: "+money(landed)+"; estimated cost per unit: "+money(landed/qty)+". "+(result.message||"Stock list refreshed from Supabase."),"ok");
+  }catch(err){setStatus(errText(err),"err");}
+  finally{btn.disabled=false;}
+});
+$("completeSaleBtn").addEventListener("click",async()=>{
+ const btn=$("completeSaleBtn");
+ if(!currentUser||!businessId)return setStatus("Please sign in first.","err");
+ if(!cart.length)return setStatus("Add at least one product to the cart.","err");
+ const total=Math.round(cart.reduce((a,x)=>a+x.price*x.quantity,0)*100)/100;
+ if(!confirm("Record this fully paid sale for "+money(total)+" using "+$("paymentMethod").selectedOptions[0].text+"? Stock will be deducted."))return;
+ btn.disabled=true;setStatus("Recording sale securely and updating stock…","info");
+ try{
+  const payload={p_business_id:businessId,p_items:cart.map(x=>({product_id:x.id,quantity:x.quantity,sale_type:x.type})),p_payments:[{method:$("paymentMethod").value,amount:total}],p_customer_id:null,p_discount:0,p_idempotency_key:crypto.randomUUID()};
+  const {data,error}=await db.rpc("kpoint_checkout",payload);
+  if(error)throw new Error("Sale not recorded: "+errText(error)+". Check that the checkout SQL setup was run successfully.");
+  if(!data?.ok)throw new Error(data?.message||"The database did not confirm the sale.");
+  cart=[];renderCart();await loadProducts();
+  setStatus((data.duplicate?"This sale was already recorded. ":"Sale recorded successfully. ")+"Receipt: "+(data.receipt_number||"already recorded")+". Total: "+money(data.total??total)+". Stock has been refreshed from the cloud.","ok");
+ }catch(e){setStatus(errText(e),"err");}
+ finally{btn.disabled=false;}
+});
+$("cameraBtn").addEventListener("click",async()=>{
+ try{
+  if(!navigator.mediaDevices?.getUserMedia)throw new Error("This browser/file location doesn't provide camera access. Try an HTTPS-hosted page or use the scanner input.");
+  if(!("BarcodeDetector" in window))throw new Error("This browser doesn't support built-in barcode detection. Use the Bluetooth/USB scanner input for now.");
+  const detector=new BarcodeDetector({formats:["ean_13","ean_8","upc_a","upc_e","code_128","code_39","qr_code"]});
+  cameraStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:"environment"}},audio:false});
+  $("cameraVideo").srcObject=cameraStream;await $("cameraVideo").play();$("cameraArea").classList.remove("hidden");$("cameraBtn").classList.add("hidden");$("stopCameraBtn").classList.remove("hidden");
+  const scan=async()=>{if(!cameraStream)return;try{const codes=await detector.detect($("cameraVideo"));if(codes.length){const code=codes[0].rawValue;$("scanInput").value=code;const p=productRows.find(p=>String(p.barcode||"")===code||String(p.product_code||"")===code);if(p){$("productPick").value=p.id;setStatus("Scanned "+code+" — "+p.name+". Set quantity and add to cart.","ok");stopCamera();return;}setStatus("Scanned "+code+", but no product has that barcode yet.","err");}}catch(e){}cameraTimer=setTimeout(scan,500);};scan();
+ }catch(e){setStatus(errText(e),"err");}
+});
+function stopCamera(){if(cameraTimer)clearTimeout(cameraTimer);cameraTimer=null;if(cameraStream){cameraStream.getTracks().forEach(t=>t.stop());cameraStream=null;}$("cameraVideo").srcObject=null;$("cameraArea").classList.add("hidden");$("cameraBtn").classList.remove("hidden");$("stopCameraBtn").classList.add("hidden");}
+$("stopCameraBtn").addEventListener("click",stopCamera);
+const oldLoadProducts=loadProducts;
+loadProducts=async function(){await oldLoadProducts();refreshPicker();refreshReceivePicker();};
+(async()=>{try{const {data:{session}}=await db.auth.getSession();if(session){currentUser=session.user;await resolveBusiness();$("loginCard").classList.add("hidden");$("productSection").classList.remove("hidden");$("signOutBtn").classList.remove("hidden");await loadProducts();startProductRealtime();setStatus("Your existing session is connected to Supabase. Live product updates are enabled when the database realtime feed is available.","ok");}}catch(e){setStatus("Please sign in. "+errText(e),"info");}})();
+</script>
+</body>
+</html>
